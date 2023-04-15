@@ -113,6 +113,7 @@
 #define VBIF_XIN_HALT_TIMEOUT		0x4000
 
 #define DEFAULT_PIXEL_RAM_SIZE		(50 * 1024)
+#define SDM630_PIXEL_RAM_SIZE		(40 * 1024)
 
 /* access property value based on prop_type and hardware index */
 #define PROP_VALUE_ACCESS(p, i, j)		((p + i)->value[j])
@@ -1323,7 +1324,9 @@ static void _sde_sspp_setup_cursor(struct sde_mdss_cfg *sde_cfg,
 	struct sde_sspp_cfg *sspp, struct sde_sspp_sub_blks *sblk,
 	struct sde_prop_value *prop_value, u32 *cursor_count)
 {
-	if (!IS_SDE_MAJOR_MINOR_SAME(sde_cfg->hwversion, SDE_HW_VER_300))
+	if (!IS_SDE_MAJOR_MINOR_SAME(sde_cfg->hwversion, SDE_HW_VER_300) &&
+		!IS_SDE_MAJOR_MINOR_SAME(sde_cfg->hwversion, SDE_HW_VER_320) &&
+		!IS_SDE_MAJOR_MINOR_SAME(sde_cfg->hwversion, SDE_HW_VER_330))
 		SDE_ERROR("invalid sspp type %d, xin id %d\n",
 				sspp->type, sspp->xin_id);
 	set_bit(SDE_SSPP_CURSOR, &sspp->features);
@@ -1430,7 +1433,7 @@ static int sde_dgm_parse_dt(struct device_node *np, u32 index,
 }
 
 static int sde_sspp_parse_dt(struct device_node *np,
-	struct sde_mdss_cfg *sde_cfg)
+	struct sde_mdss_cfg *sde_cfg, uint32_t hw_rev)
 {
 	int rc, prop_count[SSPP_PROP_MAX], off_count, i, j;
 	int vig_prop_count[VIG_PROP_MAX], rgb_prop_count[RGB_PROP_MAX];
@@ -1601,7 +1604,12 @@ static int sde_sspp_parse_dt(struct device_node *np,
 		}
 
 		sspp->xin_id = PROP_VALUE_ACCESS(prop_value, SSPP_XIN, i);
-		sblk->pixel_ram_size = DEFAULT_PIXEL_RAM_SIZE;
+
+		if (IS_SDM630_TARGET(hw_rev))
+			sblk->pixel_ram_size = SDM630_PIXEL_RAM_SIZE;
+		else
+			sblk->pixel_ram_size = DEFAULT_PIXEL_RAM_SIZE;
+
 		sblk->src_blk.len = PROP_VALUE_ACCESS(prop_value, SSPP_SIZE, 0);
 
 		if (PROP_VALUE_ACCESS(prop_value, SSPP_EXCL_RECT, i) == 1)
@@ -4238,6 +4246,20 @@ static int _sde_hardware_pre_caps(struct sde_mdss_cfg *sde_cfg, uint32_t hw_rev)
 		sde_cfg->has_decimation = true;
 		sde_cfg->has_cursor = true;
 		sde_cfg->has_hdr = true;
+	} else if (IS_SDM660_TARGET(hw_rev) || IS_SDM630_TARGET(hw_rev)) {
+		sde_cfg->has_wb_ubwc = true;
+		sde_cfg->perf.min_prefill_lines = 25;
+		sde_cfg->vbif_qos_nlvl = 4;
+		sde_cfg->ts_prefill_rev = 1;
+		clear_bit(MDSS_INTR_AD4_0_INTR, sde_cfg->mdss_irqs);
+		clear_bit(MDSS_INTR_AD4_1_INTR, sde_cfg->mdss_irqs);
+		clear_bit(MDSS_INTF_TEAR_1_INTR, sde_cfg->mdss_irqs);
+		clear_bit(MDSS_INTF_TEAR_2_INTR, sde_cfg->mdss_irqs);
+		clear_bit(MDSS_INTR_LTM_0_INTR, sde_cfg->mdss_irqs);
+		clear_bit(MDSS_INTR_LTM_1_INTR, sde_cfg->mdss_irqs);
+		sde_cfg->has_decimation = true;
+		sde_cfg->has_cursor = true;
+		sde_cfg->has_hdr = true;
 	} else if (IS_SDM845_TARGET(hw_rev)) {
 		sde_cfg->has_wb_ubwc = true;
 		sde_cfg->has_cwb_support = true;
@@ -4385,6 +4407,8 @@ static int _sde_hardware_pre_caps(struct sde_mdss_cfg *sde_cfg, uint32_t hw_rev)
 		sde_cfg->sui_block_xin_mask = 0xC61;
 		sde_cfg->has_hdr = false;
 		sde_cfg->has_sui_blendstage = true;
+		clear_bit(MDSS_INTR_LTM_0_INTR, sde_cfg->mdss_irqs);
+		clear_bit(MDSS_INTR_LTM_1_INTR, sde_cfg->mdss_irqs);
 	} else if (IS_BENGAL_TARGET(hw_rev)) {
 		sde_cfg->has_cwb_support = false;
 		sde_cfg->has_qsync = true;
@@ -4631,7 +4655,7 @@ struct sde_mdss_cfg *sde_hw_catalog_init(struct drm_device *dev, u32 hw_rev)
 	if (rc)
 		goto end;
 
-	rc = sde_sspp_parse_dt(np, sde_cfg);
+	rc = sde_sspp_parse_dt(np, sde_cfg, hw_rev);
 	if (rc)
 		goto end;
 
